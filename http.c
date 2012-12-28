@@ -15,6 +15,8 @@ struct request {
     char *path;
     struct sa dest;
     req_state state;
+    int secure;
+    int port;
 };
 
 static void signal_handler(int sig)
@@ -76,21 +78,65 @@ void http_send(struct request *request)
 		    request);
 }
 
-void http_init(struct request **rpp, char *host, char *path)
+struct url {
+    struct pl scheme;
+    struct pl host;
+    struct pl path;
+    int port;
+};
+
+int url_decode(struct url* url, struct pl *pl)
 {
+    int ok;
+    ok = re_regex(pl->p, pl->l,
+        "[^:]+://[^/]+[^]*", &url->scheme,
+	&url->host, &url->path);
+    url->port = 0;
+    return 0;
+}
+
+void http_init(struct request **rpp, char *str_uri)
+{
+    int ok;
     struct request *request;
+    struct pl pl_uri;
+    struct url url;
+
+    *rpp = NULL;
+
+    pl_uri.p = NULL;
+    str_dup((char**)&pl_uri.p, str_uri);
+    pl_uri.l = strlen(str_uri);
+
+    ok = url_decode(&url, &pl_uri);
+    re_printf("decode %d uri %r\n", ok, &pl_uri);
+
+    if(ok!=0)
+        goto err_uri;
 
     request = mem_zalloc(sizeof(*request), destructor);
 
-    str_dup(&request->host, host);
-    str_dup(&request->path, path);
+    pl_strdup(&request->host, &url.host);
+    pl_strdup(&request->path, &url.path);
+    request->secure = !pl_strcmp(&url.scheme, "https");
     memcpy(&request->meth, "GET", 4);
     request->meth[4] = 0;
 
+    if(url.port)
+	request->port = url.port;
+    else
+        request->port = request->secure ? 443 : 80;
+
+    re_printf("secure: %d port %d\n", request->secure, request->port);
     sa_decode(&request->dest, "46.182.27.206:80", 16);
 
     *rpp = request;
 
+err_uri:
+    if(pl_uri.p)
+        mem_deref((void*)pl_uri.p);
+
+    return;
 }
 
 int main(int argc, char *argv[])
@@ -110,7 +156,7 @@ int main(int argc, char *argv[])
     re_printf("enter loop\n");
 
     struct request *request;
-    http_init(&request, "enodev.org", "/");
+    http_init(&request, "http://enodev.org/");
     http_send(request);
 
     err = re_main(signal_handler);
