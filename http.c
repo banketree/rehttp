@@ -10,6 +10,10 @@ typedef enum {
 
 struct request {
     struct tcp_conn *tcp;
+    char *host;
+    char meth[5];
+    char *path;
+    struct sa dest;
     req_state state;
 };
 
@@ -26,11 +30,12 @@ static void tcp_estab_handler(void *arg)
     struct mbuf *mb;
 
     mb = mbuf_alloc(1024);
-    mbuf_write_str(mb, "GET / HTTP/1.1\r\n");
-    mbuf_write_str(mb, "Host: enodev.org\r\n");
+    mbuf_printf(mb, "%s %s HTTP/1.1\r\n", request->meth, request->path);
+    mbuf_printf(mb, "Host: %s\r\n", request->host);
     mbuf_write_str(mb, "\r\n\r\n");
 
     mb->pos = 0;
+
     tcp_send(request->tcp, mb);
     mem_deref(mb);
 
@@ -57,22 +62,34 @@ static void destructor(void *arg)
 
     struct request * request = arg;
     mem_deref(request->tcp);
+    mem_deref(request->host);
+    mem_deref(request->path);
     re_printf("dealloc connection\n");
 }
 
-void request()
+void http_send(struct request *request)
 {
-    struct sa dest;
-    struct request *request;
-
-    request = mem_zalloc(sizeof(*request), destructor);
-    sa_decode(&dest, "46.182.27.206:80", 17);
-
-    tcp_connect(&request->tcp, &dest, 
+    tcp_connect(&request->tcp, &request->dest, 
 		    tcp_estab_handler,
 		    tcp_recv_handler,
 		    tcp_close_handler,
 		    request);
+}
+
+void http_init(struct request **rpp, char *host, char *path)
+{
+    struct request *request;
+
+    request = mem_zalloc(sizeof(*request), destructor);
+
+    str_dup(&request->host, host);
+    str_dup(&request->path, path);
+    memcpy(&request->meth, "GET", 4);
+    request->meth[4] = 0;
+
+    sa_decode(&request->dest, "46.182.27.206:80", 16);
+
+    *rpp = request;
 
 }
 
@@ -91,7 +108,11 @@ int main(int argc, char *argv[])
     err = tls_alloc(&tlsp, TLS_METHOD_SSLV23, k, NULL);
 
     re_printf("enter loop\n");
-    request();
+
+    struct request *request;
+    http_init(&request, "enodev.org", "/");
+    http_send(request);
+
     err = re_main(signal_handler);
 
     goto out;
