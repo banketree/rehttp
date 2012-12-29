@@ -3,13 +3,21 @@
 
 typedef enum {
     START,
+    RESOLVED,
     ESTAB,
     SENT,
     END
 } req_state;
 
+struct app {
+    struct dnsc *dnsc;
+};
+
 struct request {
+    struct app *app;
     struct tcp_conn *tcp;
+    struct dns_query *dnsq;
+
     char *host;
     char meth[5];
     char *path;
@@ -17,7 +25,14 @@ struct request {
     req_state state;
     int secure;
     int port;
+
+    struct list addrl;
+    struct list srvl;
+    struct list cachel;
 };
+
+int addr_lookup(struct request *request, char *name);
+void http_send(struct request *request);
 
 static void signal_handler(int sig)
 {
@@ -49,9 +64,6 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
     re_printf("recv data\n");
     re_printf("response: %b\n", mbuf_buf(mb), mbuf_get_left(mb));
 
-    mem_deref(request);
-
-    re_cancel();
 }
 
 static void tcp_close_handler(int err, void *arg)
@@ -66,11 +78,114 @@ static void destructor(void *arg)
     mem_deref(request->tcp);
     mem_deref(request->host);
     mem_deref(request->path);
+
+    list_flush(&request->cachel);
+    list_flush(&request->addrl);
+    list_flush(&request->srvl);
+
     re_printf("dealloc connection\n");
 }
 
+static bool rr_append_handler(struct dnsrr *rr, void *arg)
+{
+	struct list *lst = arg;
+
+	switch (rr->type) {
+
+	case DNS_TYPE_A:
+	case DNS_TYPE_AAAA:
+	case DNS_TYPE_SRV:
+		if (rr->le.list)
+			break;
+
+		list_append(lst, &rr->le, mem_ref(rr));
+		break;
+	}
+
+	return false;
+}
+
+static int request_next(struct request *req, struct sa* dst)
+{
+	struct dnsrr *rr;
+	int err = 0;
+
+	rr = list_ledata(req->addrl.head);
+
+	switch (rr->type) {
+
+	case DNS_TYPE_A:
+		sa_set_in(dst, rr->rdata.a.addr, req->port);
+		break;
+
+	case DNS_TYPE_AAAA:
+		sa_set_in6(dst, rr->rdata.aaaa.addr, req->port);
+		break;
+
+	default:
+		return EINVAL;
+	}
+
+	list_unlink(&rr->le);
+	mem_deref(rr);
+
+	return err;
+}
+
+
+static void addr_handler(int err, const struct dnshdr *hdr, struct list *ansl,
+			 struct list *authl, struct list *addl, void *arg)
+{
+	struct request *req = arg;
+	int ok;
+	(void)hdr;
+	(void)authl;
+	(void)addl;
+
+	dns_rrlist_apply2(ansl, NULL, DNS_TYPE_A, DNS_TYPE_AAAA, DNS_CLASS_IN,
+			  false, rr_append_handler, &req->addrl);
+
+
+	ok = request_next(req, &req->dest);
+	mem_deref(req->dnsq);
+
+	re_printf("dns ok %d dst %j\n", ok, &req->dest);
+	if(ok)
+	    goto fail;
+
+	req->state = RESOLVED;
+	http_send(req);
+	return;
+fail:
+        re_printf("cant resolve %s\n", req->host);
+}
+
+
+
+int addr_lookup(struct request *request, char *name)
+{
+    int ok;
+    ok = dnsc_query(&request->dnsq, request->app->dnsc,
+		    name,
+		    DNS_TYPE_A, DNS_CLASS_IN, true,
+		    addr_handler, request);
+
+    return ok;
+
+}
+
+void http_resolve(struct request *request)
+{
+    addr_lookup(request, request->host);
+}
+
+
 void http_send(struct request *request)
 {
+    if(request->state == START) {
+        http_resolve(request);
+        return;
+    }
     tcp_connect(&request->tcp, &request->dest, 
 		    tcp_estab_handler,
 		    tcp_recv_handler,
@@ -95,7 +210,7 @@ int url_decode(struct url* url, struct pl *pl)
     return 0;
 }
 
-void http_init(struct request **rpp, char *str_uri)
+void http_init(struct app *app, struct request **rpp, char *str_uri)
 {
     int ok;
     struct request *request;
@@ -129,7 +244,12 @@ void http_init(struct request **rpp, char *str_uri)
 
     re_printf("secure: %d port %d\n", request->secure, request->port);
     sa_decode(&request->dest, "46.182.27.206:80", 16);
+    sa_init(&request->dest, AF_INET);
+    ok = sa_set_str(&request->dest, request->host, request->port);
 
+    request->state = ok ? START : RESOLVED;
+
+    request->app = app;
     *rpp = request;
 
 err_uri:
@@ -155,11 +275,20 @@ int main(int argc, char *argv[])
 
     re_printf("enter loop\n");
 
+    struct app app;
+    struct sa nsv[16];
+    uint32_t nsc = ARRAY_SIZE(nsv);
+
+    err = dns_srv_get(NULL, 0, nsv, &nsc);
+
+    err = dnsc_alloc(&app.dnsc, NULL, nsv, nsc);
+
     struct request *request;
-    http_init(&request, "http://enodev.org/");
-    http_send(request);
+    http_init(&app, &request, "http://enodev.org/");
+    http_resolve(request);
 
     err = re_main(signal_handler);
+    mem_deref(request);
 
     goto out;
 
@@ -168,6 +297,7 @@ fail:
 out:
     re_printf("exit\n");
 
+    mem_deref(app.dnsc);
     mem_deref(tlsp);
 
     libre_close();
