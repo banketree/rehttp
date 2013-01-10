@@ -70,6 +70,7 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
 static void tcp_close_handler(int err, void *arg)
 {
     re_printf("close %d\n", err);
+    re_cancel();
 }
 
 static void destructor(void *arg)
