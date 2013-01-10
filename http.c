@@ -12,7 +12,8 @@ typedef enum {
     END
 } req_state;
 
-typedef void (err_h)(int err, void *arg);
+struct request;
+
 
 struct http_hdr {
     struct le he;
@@ -45,10 +46,20 @@ struct request {
     struct list srvl;
     struct list cachel;
     err_h *err_h;
+    done_h *done_h;
+    void *arg;
 };
 
 int addr_lookup(struct request *request, char *name);
 void http_send(struct request *request);
+
+static void dummy_err(int err, void *arg) {
+    re_printf("http err %d\n", err);
+}
+
+static void http_done(struct request *req, int code, void *arg) {
+    re_printf("done %d body %r\n", code, &req->body);
+}
 
 void hdr_destruct(void *arg) {
     struct http_hdr *hdr = arg;
@@ -78,7 +89,7 @@ int parse_headers(struct request *req, char *start, int len)
     header.l = 0;
 
     hval.p = NULL;
-    hval.l = -1;
+    hval.l = -2;
 
     ct = &header.l;
 
@@ -104,7 +115,7 @@ int parse_headers(struct request *req, char *start, int len)
 
 	    header.p = p+1;
 	    header.l = -1;
-	    hval.l = -1;
+	    hval.l = -2;
 	    ct = &header.l;
 
 	    hval.p = NULL;
@@ -180,18 +191,19 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
     request->status = pl_u32(&code);
     headers.l = mbuf_get_left(mb) - (headers.p - (const char*)mbuf_buf(mb));
     parse_headers(request, (char*)headers.p, headers.l);
-    re_printf("body: %r\n", &request->body);
     request->response = mem_ref(mb);
+
+    if(request->clen > request->body.l)
+	return;
+
+    request->done_h(request, request->status, request->arg);
 }
 
 static void tcp_close_handler(int err, void *arg)
 {
     struct request *request = arg;
     if(err!=0) {
-	if(request->err_h)
-            request->err_h(err, NULL);
-	else
-            re_printf("http(tcp) failed with err %d\n", err);
+        request->err_h(err, request->arg);
     }
     mem_deref(request);
 }
@@ -368,6 +380,8 @@ void http_init(struct httpc *app, struct request **rpp, char *str_uri)
 
     request = mem_zalloc(sizeof(*request), destructor);
     ok = hash_alloc(&request->hdrht, HDR_HASH_SIZE);
+    request->err_h = dummy_err;
+    request->done_h = http_done;
 
     pl_strdup(&request->host, &url.host);
     pl_strdup(&request->path, &url.path);
@@ -394,4 +408,18 @@ err_uri:
         mem_deref((void*)pl_uri.p);
 
     return;
+}
+void http_cb(struct request* request, void *arg, done_h *dh, err_h *eh)
+{
+    request->arg = arg;
+    if(dh)
+        request->done_h = dh;
+
+    if(eh)
+        request->err_h = eh;
+}
+
+struct pl * http_data(struct request *req)
+{
+    return &req->body;
 }

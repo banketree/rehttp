@@ -19,7 +19,13 @@ enum http_hdr_id {
     HTTP_CONNECTION=0x361,
 };
 
+typedef void (err_h)(int err, void *arg);
+typedef void (done_h)(struct request* req, int code, void *arg);
+
 void http_init(struct httpc *app, struct request **rpp, char *str_uri);
 void http_send(struct request *request);
+void http_cb(struct request* request, void *arg, done_h *dh, err_h *eh);
+
+struct pl * http_data(struct request *req);
 
 #endif
