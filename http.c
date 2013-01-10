@@ -1,5 +1,6 @@
 #include <string.h>
 #include <re.h>
+#include "http.h"
 
 typedef enum {
     START,
@@ -9,13 +10,9 @@ typedef enum {
     END
 } req_state;
 
-struct app {
-    struct dnsc *dnsc;
-    struct tls *tls;
-};
 
 struct request {
-    struct app *app;
+    struct httpc *app;
     struct tcp_conn *tcp;
     struct tls_conn *ssl;
     struct dns_query *dnsq;
@@ -36,11 +33,6 @@ struct request {
 int addr_lookup(struct request *request, char *name);
 void http_send(struct request *request);
 
-static void signal_handler(int sig)
-{
-    re_printf("terminating on signal %d...\n", sig);
-    re_cancel();
-}
 
 static void tcp_estab_handler(void *arg)
 {
@@ -241,7 +233,7 @@ int url_decode(struct url* url, struct pl *pl)
     return 0;
 }
 
-void http_init(struct app *app, struct request **rpp, char *str_uri)
+void http_init(struct httpc *app, struct request **rpp, char *str_uri)
 {
     int ok;
     struct request *request;
@@ -288,54 +280,3 @@ err_uri:
 
     return;
 }
-
-int main(int argc, char *argv[])
-{
-    int err;
-    struct app app;
-    struct sa laddr;
-
-    err = libre_init();
-
-    err = net_default_source_addr_get(AF_INET, &laddr);
-
-    char k[] = "user.cert";
-
-    err = tls_alloc(&app.tls, TLS_METHOD_SSLV23, k, NULL);
-    tls_add_ca(app.tls, "ca.cert");
-
-    re_printf("enter loop\n");
-
-    struct sa nsv[16];
-    uint32_t nsc = ARRAY_SIZE(nsv);
-
-    err = dns_srv_get(NULL, 0, nsv, &nsc);
-
-    err = dnsc_alloc(&app.dnsc, NULL, nsv, nsc);
-
-    struct request *request;
-    http_init(&app, &request, "https://texr.enodev.org/api/contacts");
-    http_resolve(request);
-
-    err = re_main(signal_handler);
-    mem_deref(request);
-
-    goto out;
-
-fail:
-    re_printf("failed\n");
-out:
-    re_printf("exit\n");
-
-    mem_deref(app.dnsc);
-    mem_deref(app.tls);
-
-    libre_close();
-
-    /* check for memory leaks */
-    tmr_debug();
-    mem_debug();
-
-
-}
-
