@@ -11,11 +11,13 @@ typedef enum {
 
 struct app {
     struct dnsc *dnsc;
+    struct tls *tls;
 };
 
 struct request {
     struct app *app;
     struct tcp_conn *tcp;
+    struct tls_conn *ssl;
     struct dns_query *dnsq;
 
     char *host;
@@ -43,8 +45,21 @@ static void signal_handler(int sig)
 static void tcp_estab_handler(void *arg)
 {
     re_printf("estab!\n");
+    int ok;
     struct request * request = arg;
     struct mbuf *mb;
+
+    char CN[256];
+
+    if(request->secure) {
+	ok = tls_verify_cert(request->ssl, CN, sizeof(CN));
+	if(ok!=0)
+            goto fail;
+
+	ok = strcmp(request->host, CN);
+	if(ok!=0)
+	    goto fail;
+    }
 
     mb = mbuf_alloc(1024);
     mbuf_printf(mb, "%s %s HTTP/1.1\r\n", request->meth, request->path);
@@ -57,6 +72,11 @@ static void tcp_estab_handler(void *arg)
     tcp_send(request->tcp, mb);
     mem_deref(mb);
 
+    return;
+
+fail:
+    re_printf("ssl fail\n");
+    re_cancel();
 }
 
 static void tcp_recv_handler(struct mbuf *mb, void *arg)
@@ -78,6 +98,8 @@ static void destructor(void *arg)
 
     struct request * request = arg;
     mem_deref(request->tcp);
+    if(request->ssl)
+	mem_deref(request->ssl);
     mem_deref(request->host);
     mem_deref(request->path);
 
@@ -184,6 +206,8 @@ void http_resolve(struct request *request)
 
 void http_send(struct request *request)
 {
+    int ok;
+
     if(request->state == START) {
         http_resolve(request);
         return;
@@ -193,6 +217,11 @@ void http_send(struct request *request)
 		    tcp_recv_handler,
 		    tcp_close_handler,
 		    request);
+
+    if(request->secure) {
+        ok = tls_start_tcp(&request->ssl, request->app->tls, request->tcp, 0);
+	re_printf("start ssl %d\n", ok);
+    }
 }
 
 struct url {
@@ -263,8 +292,8 @@ err_uri:
 int main(int argc, char *argv[])
 {
     int err;
+    struct app app;
     struct sa laddr;
-    struct tls *tlsp = NULL;
 
     err = libre_init();
 
@@ -272,11 +301,11 @@ int main(int argc, char *argv[])
 
     char k[] = "user.cert";
 
-    err = tls_alloc(&tlsp, TLS_METHOD_SSLV23, k, NULL);
+    err = tls_alloc(&app.tls, TLS_METHOD_SSLV23, k, NULL);
+    tls_add_ca(app.tls, "ca.cert");
 
     re_printf("enter loop\n");
 
-    struct app app;
     struct sa nsv[16];
     uint32_t nsc = ARRAY_SIZE(nsv);
 
@@ -285,7 +314,7 @@ int main(int argc, char *argv[])
     err = dnsc_alloc(&app.dnsc, NULL, nsv, nsc);
 
     struct request *request;
-    http_init(&app, &request, "http://enodev.org/");
+    http_init(&app, &request, "https://texr.enodev.org/api/contacts");
     http_resolve(request);
 
     err = re_main(signal_handler);
@@ -299,7 +328,7 @@ out:
     re_printf("exit\n");
 
     mem_deref(app.dnsc);
-    mem_deref(tlsp);
+    mem_deref(app.tls);
 
     libre_close();
 
