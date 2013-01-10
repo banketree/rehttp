@@ -2,6 +2,8 @@
 #include <re.h>
 #include "http.h"
 
+#define HDR_HASH_SIZE 32
+
 typedef enum {
     START,
     RESOLVED,
@@ -11,6 +13,13 @@ typedef enum {
 } req_state;
 
 typedef void (err_h)(int err, void *arg);
+
+struct http_hdr {
+    struct le he;
+    struct pl name;
+    struct pl val;
+    enum http_hdr_id id;
+};
 
 struct request {
     struct httpc *app;
@@ -26,6 +35,12 @@ struct request {
     int secure;
     int port;
 
+    int status;
+    size_t clen;
+    struct pl body;
+    struct mbuf *response;
+    struct hash *hdrht;
+
     struct list addrl;
     struct list srvl;
     struct list cachel;
@@ -35,42 +50,73 @@ struct request {
 int addr_lookup(struct request *request, char *name);
 void http_send(struct request *request);
 
-int parse_headers(char *start, int len, const char **body){
-    int hlen = 0, hvlen = -1, *ct;
+void hdr_destruct(void *arg) {
+    struct http_hdr *hdr = arg;
+    hash_unlink(&hdr->he);
+
+}
+
+void hdr_add(struct request *req, enum http_hdr_id id, struct pl *name, struct pl *val)
+{
+    struct http_hdr *hdr;
+    if(id==HTTP_CONTENT_LENGTH)
+        req->clen = pl_u32(val);
+
+    hdr = mem_zalloc(sizeof(struct http_hdr), hdr_destruct);
+
+    hash_append(req->hdrht, id, &hdr->he, hdr);
+}
+
+int parse_headers(struct request *req, char *start, int len)
+{
     int br=0;
+    size_t *ct;
+    enum http_hdr_id id;
     char *p = start;
-    char *header = start;
-    char *header_val = NULL;
-    ct = &hlen;
+    struct pl header, hval;
+    header.p = start;
+    header.l = 0;
+
+    hval.p = NULL;
+    hval.l = -1;
+
+    ct = &header.l;
+
     while(len) {
 	switch(*p) {
 	case '\n':
 	case '\r':
-		br++;
-		break;
+	    br++;
+	    break;
 	case ':':
-		ct = &hvlen;
-	default:
-		br = 0;
+	    if(ct == &header.l) {
+	        ct = &hval.l;
+	        hval.p = p+2;
+	    }
+        default:
+	    br = 0;
 	}
 	if(br) {
-	    if(hlen>4) {
-                re_printf("h %b\n", header, hlen);
-		re_printf("v %b\n", header+hlen+2, hvlen);
+	    if(header.l) {
+	        id = (enum http_hdr_id)hash_joaat_ci(header.p, header.l) & 0xFFF;
+                hdr_add(req, id, &header, &hval);
 	    }
-	    header = p+1;
-	    hlen = -1;
-	    hvlen = -1;
-	    ct = &hlen;
 
-	    header_val = NULL;
+	    header.p = p+1;
+	    header.l = -1;
+	    hval.l = -1;
+	    ct = &header.l;
+
+	    hval.p = NULL;
 	}
 	p++;
 	(*ct)++;
 	len--;
 
-	if(br>3)
-	    *body = p;
+	if(br>3) {
+	    req->body.p = p;
+	    req->body.l = len;
+	}
     }
 
     return 0;
@@ -115,30 +161,27 @@ fail:
 static void tcp_recv_handler(struct mbuf *mb, void *arg)
 {
     struct request *request = arg;
-    int ok, tmp;
+    int ok;
 
     struct pl ver;
     struct pl code;
     struct pl phrase;
     struct pl headers;
-    struct pl body;
 
     re_printf("recv data\n");
 
     ok = re_regex((const char*)mbuf_buf(mb), mbuf_get_left(mb),
 	"HTTP/[^ \t\r\n]+ [0-9]+ [^ \t\r\n]+\r\n[^]1",
 	&ver, &code, &phrase, &headers);
+
     // XXX: check ok
     // XXX: check headers.l
-    headers.l = mbuf_get_left(mb) - (headers.p - (const char*)mbuf_buf(mb));
-    parse_headers((char*)headers.p, headers.l, &body.p);
-    tmp = body.p - headers.p;
-    body.l = headers.l - tmp;
-    headers.l = tmp-2;
-    re_printf("decode %d\n", ok);
-    re_printf("body %r\n", &body);
-    re_printf("headers: %r\n", &headers);
 
+    request->status = pl_u32(&code);
+    headers.l = mbuf_get_left(mb) - (headers.p - (const char*)mbuf_buf(mb));
+    parse_headers(request, (char*)headers.p, headers.l);
+    re_printf("body: %r\n", &request->body);
+    request->response = mem_ref(mb);
 }
 
 static void tcp_close_handler(int err, void *arg)
@@ -162,6 +205,9 @@ static void destructor(void *arg)
 	mem_deref(request->ssl);
     mem_deref(request->host);
     mem_deref(request->path);
+    hash_flush(request->hdrht);
+    mem_deref(request->hdrht);
+    mem_deref(request->response);
 
     list_flush(&request->cachel);
     list_flush(&request->addrl);
@@ -321,6 +367,7 @@ void http_init(struct httpc *app, struct request **rpp, char *str_uri)
         goto err_uri;
 
     request = mem_zalloc(sizeof(*request), destructor);
+    ok = hash_alloc(&request->hdrht, HDR_HASH_SIZE);
 
     pl_strdup(&request->host, &url.host);
     pl_strdup(&request->path, &url.path);
