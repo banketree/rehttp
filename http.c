@@ -10,6 +10,7 @@ typedef enum {
     END
 } req_state;
 
+typedef void (err_h)(int err, void *arg);
 
 struct request {
     struct httpc *app;
@@ -28,6 +29,7 @@ struct request {
     struct list addrl;
     struct list srvl;
     struct list cachel;
+    err_h *err_h;
 };
 
 int addr_lookup(struct request *request, char *name);
@@ -142,7 +144,14 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
 
 static void tcp_close_handler(int err, void *arg)
 {
-    re_printf("close %d\n", err);
+    struct request *request = arg;
+    if(err!=0) {
+	if(request->err_h)
+            request->err_h(err, NULL);
+	else
+            re_printf("http(tcp) failed with err %d\n", err);
+    }
+    mem_deref(request);
     re_cancel();
 }
 

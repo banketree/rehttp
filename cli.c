@@ -34,7 +34,6 @@ int main(int argc, char *argv[])
     http_send(request);
 
     err = re_main(signal_handler);
-    mem_deref(request);
 
     goto out;
 
