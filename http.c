@@ -33,6 +33,46 @@ struct request {
 int addr_lookup(struct request *request, char *name);
 void http_send(struct request *request);
 
+int parse_headers(char *start, int len, const char **body){
+    int hlen = 0, hvlen = -1, *ct;
+    int br=0;
+    char *p = start;
+    char *header = start;
+    char *header_val = NULL;
+    ct = &hlen;
+    while(len) {
+	switch(*p) {
+	case '\n':
+	case '\r':
+		br++;
+		break;
+	case ':':
+		ct = &hvlen;
+	default:
+		br = 0;
+	}
+	if(br) {
+	    if(hlen>4) {
+                re_printf("h %b\n", header, hlen);
+		re_printf("v %b\n", header+hlen+2, hvlen);
+	    }
+	    header = p+1;
+	    hlen = -1;
+	    hvlen = -1;
+	    ct = &hlen;
+
+	    header_val = NULL;
+	}
+	p++;
+	(*ct)++;
+	len--;
+
+	if(br>3)
+	    *body = p;
+    }
+
+    return 0;
+}
 
 static void tcp_estab_handler(void *arg)
 {
@@ -74,8 +114,29 @@ fail:
 static void tcp_recv_handler(struct mbuf *mb, void *arg)
 {
     struct request *request = arg;
+    int ok, tmp;
+
+    struct pl ver;
+    struct pl code;
+    struct pl phrase;
+    struct pl headers;
+    struct pl body;
+
     re_printf("recv data\n");
-    re_printf("response: %b\n", mbuf_buf(mb), mbuf_get_left(mb));
+
+    ok = re_regex((const char*)mbuf_buf(mb), mbuf_get_left(mb),
+	"HTTP/[^ \t\r\n]+ [0-9]+ [^ \t\r\n]+\r\n[^]1",
+	&ver, &code, &phrase, &headers);
+    // XXX: check ok
+    // XXX: check headers.l
+    headers.l = mbuf_get_left(mb) - (headers.p - (const char*)mbuf_buf(mb));
+    parse_headers((char*)headers.p, headers.l, &body.p);
+    tmp = body.p - headers.p;
+    body.l = headers.l - tmp;
+    headers.l = tmp-2;
+    re_printf("decode %d\n", ok);
+    re_printf("body %r\n", &body);
+    re_printf("headers: %r\n", &headers);
 
 }
 
