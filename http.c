@@ -49,6 +49,7 @@ static void tcp_estab_handler(void *arg)
     mb = mbuf_alloc(1024);
     mbuf_printf(mb, "%s %s HTTP/1.1\r\n", request->meth, request->path);
     mbuf_printf(mb, "Host: %s\r\n", request->host);
+    mbuf_write_str(mb, "Connection: close\r\n");
     mbuf_write_str(mb, "\r\n\r\n");
 
     mb->pos = 0;
@@ -243,7 +244,6 @@ void http_init(struct app *app, struct request **rpp, char *str_uri)
         request->port = request->secure ? 443 : 80;
 
     re_printf("secure: %d port %d\n", request->secure, request->port);
-    sa_decode(&request->dest, "46.182.27.206:80", 16);
     sa_init(&request->dest, AF_INET);
     ok = sa_set_str(&request->dest, request->host, request->port);
 
