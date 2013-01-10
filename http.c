@@ -110,7 +110,6 @@ static void tcp_estab_handler(void *arg)
 
 fail:
     re_printf("ssl fail\n");
-    re_cancel();
 }
 
 static void tcp_recv_handler(struct mbuf *mb, void *arg)
@@ -152,7 +151,6 @@ static void tcp_close_handler(int err, void *arg)
             re_printf("http(tcp) failed with err %d\n", err);
     }
     mem_deref(request);
-    re_cancel();
 }
 
 static void destructor(void *arg)
