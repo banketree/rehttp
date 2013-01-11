@@ -182,7 +182,7 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
     re_printf("recv data\n");
 
     ok = re_regex((const char*)mbuf_buf(mb), mbuf_get_left(mb),
-	"HTTP/[^ \t\r\n]+ [0-9]+ [^ \t\r\n]+\r\n[^]1",
+	"HTTP/[^ \t\r\n]+ [0-9]+ [^\t\r\n]+\r\n[^]1",
 	&ver, &code, &phrase, &headers);
 
     // XXX: check ok
