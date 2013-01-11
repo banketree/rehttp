@@ -282,6 +282,8 @@ static void addr_handler(int err, const struct dnshdr *hdr, struct list *ansl,
 	return;
 fail:
         re_printf("cant resolve %s\n", req->host);
+        req->err_h(-ENOTCONN, req->arg);
+        mem_deref(req);
 }
 
 
