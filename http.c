@@ -1,57 +1,13 @@
 #include <string.h>
 #include <re.h>
 #include "http.h"
+#include "request.h"
 
 #define HDR_HASH_SIZE 32
 
-typedef enum {
-    START,
-    RESOLVED,
-    ESTAB,
-    SENT,
-    END
-} req_state;
-
-struct request;
-
-
-struct http_hdr {
-    struct le he;
-    struct pl name;
-    struct pl val;
-    enum http_hdr_id id;
-};
-
-struct request {
-    struct httpc *app;
-    struct tcp_conn *tcp;
-    struct tls_conn *ssl;
-    struct dns_query *dnsq;
-
-    char *host;
-    char meth[5];
-    char *path;
-    struct sa dest;
-    req_state state;
-    int secure;
-    int port;
-
-    int status;
-    size_t clen;
-    struct pl body;
-    struct mbuf *response;
-    struct hash *hdrht;
-
-    struct list addrl;
-    struct list srvl;
-    struct list cachel;
-    err_h *err_h;
-    done_h *done_h;
-    void *arg;
-};
-
 int addr_lookup(struct request *request, char *name);
 void http_send(struct request *request);
+void write_auth(struct request *req, struct mbuf *mb);
 
 static void dummy_err(int err, void *arg) {
     re_printf("http err %d\n", err);
@@ -70,15 +26,24 @@ void hdr_destruct(void *arg) {
 void hdr_add(struct request *req, enum http_hdr_id id, struct pl *name, struct pl *val)
 {
     struct http_hdr *hdr;
-    if(id==HTTP_CONTENT_LENGTH)
+    switch(id) {
+    case HTTP_CONTENT_LENGTH:
         req->clen = pl_u32(val);
+        break;
+    case HTTP_WWW_AUTH:
+        req->www_auth.l = val->l;
+        req->www_auth.p = val->p;
+        break;
+    default:
+        ;;
+    }
 
     hdr = mem_zalloc(sizeof(struct http_hdr), hdr_destruct);
 
     hash_append(req->hdrht, id, &hdr->he, hdr);
 }
 
-int parse_headers(struct request *req, char *start, int len)
+int parse_headers(struct request *req, char *start, size_t len)
 {
     int br=0;
     size_t *ct;
@@ -155,8 +120,22 @@ static void tcp_estab_handler(void *arg)
     mb = mbuf_alloc(1024);
     mbuf_printf(mb, "%s %s HTTP/1.1\r\n", request->meth, request->path);
     mbuf_printf(mb, "Host: %s\r\n", request->host);
+    write_auth(request, mb);
     mbuf_write_str(mb, "Connection: close\r\n");
-    mbuf_write_str(mb, "\r\n\r\n");
+
+    if(request->post) {
+	request->post->pos = 0;
+        mbuf_printf(mb, "Content-Length: %d\r\n",
+			mbuf_get_left(request->post));
+
+	if(request->form)
+	    mbuf_printf(mb, "Content-Type: "
+	        "application/x-www-form-urlencoded\r\n\r\n");
+	mbuf_write_mem(mb, mbuf_buf(request->post),
+			   mbuf_get_left(request->post));
+    } else {
+        mbuf_write_str(mb, "\r\n\r\n");
+    }
 
     mb->pos = 0;
 
@@ -253,6 +232,8 @@ static int request_next(struct request *req, struct sa* dst)
 	int err = 0;
 
 	rr = list_ledata(req->addrl.head);
+	if(!rr)
+            return -ENOENT;
 
 	switch (rr->type) {
 
@@ -342,6 +323,69 @@ void http_send(struct request *request)
     }
 }
 
+void http_post(struct request *request, char* key, char* val)
+{
+    struct mbuf* mb;
+    memcpy(&request->meth, "POST", 5);
+    if(request->post) {
+        mb = request->post;
+    } else {
+	mb = mbuf_alloc(1024);
+    }
+    if(key) {
+        mbuf_printf(mb, "%s=%s", key, val);
+	request->form = 1;
+    } else {
+	mbuf_printf(mb, "%s", val);
+    }
+
+    request->post = mb;
+}
+
+int http_clone(struct request **rp, struct request *req)
+{
+    struct request *request;
+    int ok;
+
+    request = mem_zalloc(sizeof(*request), destructor);
+    if(!request)
+        return -ENOMEM;
+
+    ok = hash_alloc(&request->hdrht, HDR_HASH_SIZE);
+    if(ok!=0)
+        return ok;
+
+    request->err_h = req->err_h;
+    request->done_h = req->done_h;
+    request->arg = req->arg;
+
+    if(req->post)
+        request->post = mem_ref(req->post);
+    else
+	request->post = NULL;
+
+    request->form = req->form;
+    request->host = mem_ref(req->host);
+    request->path = mem_ref(req->path);
+    request->secure = req->secure;
+    request->port = req->port;
+    memcpy(&request->meth, &req->meth, 5);
+    sa_cpy(&request->dest, &req->dest);
+    request->www_auth.p = NULL;
+    request->www_auth.l = 0;
+    request->auth = NULL;
+
+    // skip network resolution
+    request->state = RESOLVED;
+    request->app = req->app;
+
+    *rp = request;
+    return 0;
+fail:
+    return ok;
+
+}
+
 struct url {
     struct pl scheme;
     struct pl host;
@@ -382,6 +426,13 @@ void http_init(struct httpc *app, struct request **rpp, char *str_uri)
     ok = hash_alloc(&request->hdrht, HDR_HASH_SIZE);
     request->err_h = dummy_err;
     request->done_h = http_done;
+    request->post = NULL;
+    request->form = 0;
+    request->www_auth.p = NULL;
+    request->www_auth.l = 0;
+    request->auth = NULL;
+
+    request->retry = 0;
 
     pl_strdup(&request->host, &url.host);
     pl_strdup(&request->path, &url.path);
