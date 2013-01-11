@@ -124,14 +124,15 @@ static void tcp_estab_handler(void *arg)
     mbuf_write_str(mb, "Connection: close\r\n");
 
     if(request->post) {
-	request->post->pos = 0;
+        request->post->pos = 0;
         mbuf_printf(mb, "Content-Length: %d\r\n",
-			mbuf_get_left(request->post));
+            mbuf_get_left(request->post));
 
 	if(request->form)
-	    mbuf_printf(mb, "Content-Type: "
-	        "application/x-www-form-urlencoded\r\n\r\n");
-	mbuf_write_mem(mb, mbuf_buf(request->post),
+            mbuf_printf(mb, "Content-Type: "
+	        "application/x-www-form-urlencoded\r\n");
+        mbuf_printf(mb, "\r\n");
+        mbuf_write_mem(mb, mbuf_buf(request->post),
 			   mbuf_get_left(request->post));
     } else {
         mbuf_write_str(mb, "\r\n\r\n");
