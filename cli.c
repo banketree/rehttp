@@ -8,6 +8,24 @@ static void signal_handler(int sig)
     re_cancel();
 }
 
+static void http_done(struct request *req, int code, void *arg) {
+    if(code==200)
+        re_printf("%r\n", http_data(req));
+    else
+	re_printf("HTTP %d\n", code); // XXX: STDERR
+
+    re_cancel();
+    // Event loop already stopped so CLOSE event
+    // would not fire and request not freed.
+    // Don`t do so in non-cli programms
+    mem_deref(req);
+}
+
+static void http_err(int err, void *arg) {
+    re_printf("Connection error %d\n", err);
+    re_cancel();
+}
+
 int main(int argc, char *argv[])
 {
     int err;
@@ -31,6 +49,7 @@ int main(int argc, char *argv[])
 
     struct request *request;
     http_init(&app, &request, "https://texr.enodev.org/api/contacts");
+    http_cb(request, NULL, http_done, http_err);
     http_send(request);
 
     err = re_main(signal_handler);
