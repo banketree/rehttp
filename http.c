@@ -356,7 +356,7 @@ int http_clone(struct request **rp, struct request *req)
 
     ok = hash_alloc(&request->hdrht, HDR_HASH_SIZE);
     if(ok!=0)
-        return ok;
+        goto fail;
 
     request->err_h = req->err_h;
     request->done_h = req->done_h;
