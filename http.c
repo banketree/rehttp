@@ -332,6 +332,7 @@ void http_post(struct request *request, char* key, char* val)
     memcpy(&request->meth, "POST", 5);
     if(request->post) {
         mb = request->post;
+        mbuf_printf(mb, "&");
     } else {
 	mb = mbuf_alloc(1024);
     }
