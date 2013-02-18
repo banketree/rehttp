@@ -146,7 +146,7 @@ static void tcp_estab_handler(void *arg)
     return;
 
 fail:
-    re_printf("ssl fail\n");
+    re_printf("ssl fail %p %d\n", request->app->tls, ok);
 }
 
 static void tcp_recv_handler(struct mbuf *mb, void *arg)
