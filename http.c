@@ -177,12 +177,18 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
 	return;
 
     request->done_h(request, request->status, request->arg);
+    request->state = END;
 }
 
 static void tcp_close_handler(int err, void *arg)
 {
     struct request *request = arg;
-    if(err!=0) {
+    if(err==0) {
+	if(request->state != END) {
+	    err = (request->status == 200) ? -ECONNRESET : request->status;
+            request->err_h(err, request->arg);
+	}
+    } else {
         request->err_h(err, request->arg);
     }
     mem_deref(request);
