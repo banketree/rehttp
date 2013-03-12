@@ -39,6 +39,10 @@ void hdr_add(struct request *req, enum http_hdr_id id, struct pl *name, struct p
     }
 
     hdr = mem_zalloc(sizeof(struct http_hdr), hdr_destruct);
+    hdr->name.l = name->l;
+    hdr->name.p = name->p;
+    hdr->val.l = val->l;
+    hdr->val.p = val->p;
 
     hash_append(req->hdrht, id, &hdr->he, hdr);
 }
