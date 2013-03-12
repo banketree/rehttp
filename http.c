@@ -102,6 +102,17 @@ int parse_headers(struct request *req, char *start, size_t len)
     return 0;
 }
 
+bool hdr_write(struct le *le, void *arg)
+{
+    struct http_hdr *hdr = le->data;
+    struct mbuf *mb = arg;
+
+    mbuf_printf(mb, "%r: %r\r\n", &hdr->name, &hdr->val);
+    mem_deref((void*)hdr->name.p);
+    mem_deref((void*)hdr->val.p);
+    return false;
+}
+
 static void tcp_estab_handler(void *arg)
 {
     re_printf("estab!\n");
@@ -126,6 +137,9 @@ static void tcp_estab_handler(void *arg)
     mbuf_printf(mb, "Host: %s\r\n", request->host);
     write_auth(request, mb);
     mbuf_write_str(mb, "Connection: close\r\n");
+
+    hash_apply(request->hdrht, hdr_write, mb);
+    hash_flush(request->hdrht);
 
     if(request->post) {
         request->post->pos = 0;
@@ -354,6 +368,26 @@ void http_post(struct request *request, char* key, char* val)
     }
 
     request->post = mb;
+}
+
+void http_header(struct request *request, char* hname, char* val)
+{
+    enum http_hdr_id id;
+    struct http_hdr *hdr;
+
+    hdr = mem_zalloc(sizeof(struct http_hdr), hdr_destruct);
+    hdr->name.l = strlen(hname);
+    hdr->name.p = mem_zalloc(hdr->name.l, NULL);
+    strncpy((char*)hdr->name.p, hname, hdr->name.l);
+
+    hdr->val.l = strlen(val);
+    hdr->val.p = mem_zalloc(hdr->val.l, NULL);
+    strncpy((char*)hdr->val.p, val, hdr->val.l);
+
+    id = (enum http_hdr_id)hash_joaat_ci(hdr->name.p, hdr->name.l);
+    id &= 0xFFF;
+
+    hash_append(request->hdrht, id, &hdr->he, hdr);
 }
 
 int http_clone(struct request **rp, struct request *req)
