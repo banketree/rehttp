@@ -91,7 +91,7 @@ void write_auth(struct request *req, struct mbuf *mb)
     err |= mbuf_write_str(mb, "\r\n");
 }
 
-int http_auth(struct request *old, char* user, char*password)
+int http_auth(struct request *old, struct request **new, char* user, char*password)
 {
     int ok;
     struct request *req;
@@ -124,6 +124,7 @@ int http_auth(struct request *old, char* user, char*password)
     re_printf("resend after auth %d\n", req->retry);
     http_send(req);
 
+    *new = req;
     return 0;
 out:
     return ok;

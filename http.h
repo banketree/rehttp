@@ -27,7 +27,7 @@ void http_init(struct httpc *app, struct request **rpp, char *str_uri);
 void http_send(struct request *request);
 void http_post(struct request *request, char* key, char* val);
 void http_header(struct request *request, char* hname, char* val);
-int http_auth(struct request *request, char* login, char*password);
+int http_auth(struct request *old, struct request **new, char* user, char*password);
 void http_cb(struct request* request, void *arg, done_h *dh, err_h *eh);
 int http_clone(struct request **rp, struct request *req);
 

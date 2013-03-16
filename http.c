@@ -196,6 +196,7 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
 
     request->done_h(request, request->status, request->arg);
     request->state = END;
+    mem_deref(request);
 }
 
 static void tcp_close_handler(int err, void *arg)
@@ -224,6 +225,11 @@ static void destructor(void *arg)
     hash_flush(request->hdrht);
     mem_deref(request->hdrht);
     mem_deref(request->response);
+    if(request->auth)
+	request->auth = mem_deref(request->auth);
+
+    if(request->post)
+	request->post = mem_deref(request->post);
 
     list_flush(&request->cachel);
     list_flush(&request->addrl);
