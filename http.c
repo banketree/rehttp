@@ -5,6 +5,10 @@
 
 #define HDR_HASH_SIZE 32
 
+#define DEBUG_MODULE "http"
+#define DEBUG_LEVEL 5
+#include <re_dbg.h>
+
 int addr_lookup(struct request *request, char *name);
 void http_send(struct request *request);
 void write_auth(struct request *req, struct mbuf *mb);
@@ -115,7 +119,7 @@ bool hdr_write(struct le *le, void *arg)
 
 static void tcp_estab_handler(void *arg)
 {
-    re_printf("estab!\n");
+    DEBUG_INFO("connection established\n");
     int ok;
     struct request * request = arg;
     struct mbuf *mb;
@@ -126,6 +130,8 @@ static void tcp_estab_handler(void *arg)
 	ok = tls_verify_cert(request->ssl, CN, sizeof(CN));
 	if(ok!=0)
             goto fail;
+
+	DEBUG_INFO("https CN %s\n", CN);
 
 	ok = strcmp(request->host, CN);
 	if(ok!=0)
@@ -164,7 +170,7 @@ static void tcp_estab_handler(void *arg)
     return;
 
 fail:
-    re_printf("ssl fail %p %d\n", request->app->tls, ok);
+    DEBUG_WARNING("ssl fail %p %d\n", request->app->tls, ok);
 }
 
 static void tcp_recv_handler(struct mbuf *mb, void *arg)
@@ -177,7 +183,7 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
     struct pl phrase;
     struct pl headers;
 
-    re_printf("recv data\n");
+    DEBUG_INFO("recv data[%d]\n", mbuf_get_left(mb));
 
     ok = re_regex((const char*)mbuf_buf(mb), mbuf_get_left(mb),
 	"HTTP/[^ \t\r\n]+ [0-9]+ [^\t\r\n]+\r\n[^]1",
@@ -235,7 +241,7 @@ static void destructor(void *arg)
     list_flush(&request->addrl);
     list_flush(&request->srvl);
 
-    re_printf("dealloc connection\n");
+    DEBUG_INFO("dealloc connection\n");
 }
 
 static bool rr_append_handler(struct dnsrr *rr, void *arg)
@@ -303,7 +309,7 @@ static void addr_handler(int err, const struct dnshdr *hdr, struct list *ansl,
 	ok = request_next(req, &req->dest);
 	mem_deref(req->dnsq);
 
-	re_printf("dns ok %d dst %j\n", ok, &req->dest);
+	DEBUG_INFO("dns ok %d dst %j\n", ok, &req->dest);
 	if(ok)
 	    goto fail;
 
@@ -311,7 +317,7 @@ static void addr_handler(int err, const struct dnshdr *hdr, struct list *ansl,
 	http_send(req);
 	return;
 fail:
-        re_printf("cant resolve %s\n", req->host);
+        DEBUG_WARNING("cant resolve %s\n", req->host);
         req->err_h(-ENOTCONN, req->arg);
         mem_deref(req);
 }
@@ -352,7 +358,7 @@ void http_send(struct request *request)
 
     if(request->secure) {
         ok = tls_start_tcp(&request->ssl, request->app->tls, request->tcp, 0);
-	re_printf("start ssl %d\n", ok);
+	DEBUG_INFO("start ssl %d\n", ok);
     }
 }
 
@@ -471,7 +477,6 @@ void http_init(struct httpc *app, struct request **rpp, char *str_uri)
     pl_uri.l = strlen(str_uri);
 
     ok = url_decode(&url, &pl_uri);
-    re_printf("decode %d uri %r\n", ok, &pl_uri);
 
     if(ok!=0)
         goto err_uri;
@@ -499,7 +504,7 @@ void http_init(struct httpc *app, struct request **rpp, char *str_uri)
     else
         request->port = request->secure ? 443 : 80;
 
-    re_printf("secure: %d port %d\n", request->secure, request->port);
+    DEBUG_INFO("secure: %d port %d\n", request->secure, request->port);
     sa_init(&request->dest, AF_INET);
     ok = sa_set_str(&request->dest, request->host, request->port);
 
