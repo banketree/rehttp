@@ -51,7 +51,7 @@ void hdr_add(struct request *req, enum http_hdr_id id, struct pl *name, struct p
     hash_append(req->hdrht, id, &hdr->he, hdr);
 }
 
-int parse_headers(struct request *req, char *start, size_t len)
+int parse_headers(struct request *req, char *start, size_t len, struct pl *body)
 {
     int br=0;
     size_t *ct;
@@ -98,8 +98,8 @@ int parse_headers(struct request *req, char *start, size_t len)
 	len--;
 
 	if(br>3) {
-	    req->body.p = p;
-	    req->body.l = len;
+	    body->p = p;
+	    body->l = len;
 	}
     }
 
@@ -182,8 +182,15 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
     struct pl code;
     struct pl phrase;
     struct pl headers;
+    struct pl body;
 
     DEBUG_INFO("recv data[%d]\n", mbuf_get_left(mb));
+
+    if(request->body) {
+        ok = mbuf_write_mem(request->body, mbuf_buf(mb), mbuf_get_left(mb));
+
+        goto clen;
+    }
 
     ok = re_regex((const char*)mbuf_buf(mb), mbuf_get_left(mb),
 	"HTTP/[^ \t\r\n]+ [0-9]+ [^\t\r\n]+\r\n[^]1",
@@ -194,10 +201,14 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
 
     request->status = pl_u32(&code);
     headers.l = mbuf_get_left(mb) - (headers.p - (const char*)mbuf_buf(mb));
-    parse_headers(request, (char*)headers.p, headers.l);
+    parse_headers(request, (char*)headers.p, headers.l, &body);
+    request->body = mbuf_alloc(body.l);
+    mbuf_write_mem(request->body, (const unsigned char*)body.p, body.l);
+
     request->response = mem_ref(mb);
 
-    if(request->clen > request->body.l)
+clen:
+    if(request->clen > request->body->end)
 	return;
 
     request->done_h(request, request->status, request->arg);
@@ -233,6 +244,9 @@ static void destructor(void *arg)
     mem_deref(request->response);
     if(request->auth)
 	request->auth = mem_deref(request->auth);
+
+    if(request->body)
+        request->body = mem_deref(request->body);
 
     if(request->post)
 	request->post = mem_deref(request->post);
@@ -529,7 +543,8 @@ void http_cb(struct request* request, void *arg, done_h *dh, err_h *eh)
         request->err_h = eh;
 }
 
-struct pl * http_data(struct request *req)
+struct mbuf * http_data(struct request *req)
 {
-    return &req->body;
+    req->body->pos = 0;
+    return req->body;
 }

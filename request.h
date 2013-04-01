@@ -36,7 +36,7 @@ struct request {
     int status;
     size_t clen;
     struct pl www_auth;
-    struct pl body;
+    struct mbuf *body;
     struct mbuf *response;
     struct hash *hdrht;
     struct realm *auth;

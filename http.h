@@ -31,6 +31,6 @@ int http_auth(struct request *old, struct request **new, char* user, char*passwo
 void http_cb(struct request* request, void *arg, done_h *dh, err_h *eh);
 int http_clone(struct request **rp, struct request *req);
 
-struct pl * http_data(struct request *req);
+struct mbuf * http_data(struct request *req);
 
 #endif
