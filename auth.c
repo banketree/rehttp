@@ -122,7 +122,6 @@ int http_auth(struct request *old, struct request **new, char* user, char*passwo
     req->auth = realm;
     req->retry = old->retry +1;
     re_printf("resend after auth %d\n", req->retry);
-    http_send(req);
 
     *new = req;
     return 0;
