@@ -27,6 +27,14 @@ void hdr_destruct(void *arg) {
 
 }
 
+void hdr_destruct2(void *arg) {
+    struct http_hdr *hdr = arg;
+    hash_unlink(&hdr->he);
+
+    mem_deref((void*)hdr->name.p);
+    mem_deref((void*)hdr->val.p);
+}
+
 void hdr_add(struct request *req, enum http_hdr_id id, struct pl *name, struct pl *val)
 {
     struct http_hdr *hdr;
@@ -112,8 +120,7 @@ bool hdr_write(struct le *le, void *arg)
     struct mbuf *mb = arg;
 
     mbuf_printf(mb, "%r: %r\r\n", &hdr->name, &hdr->val);
-    mem_deref((void*)hdr->name.p);
-    mem_deref((void*)hdr->val.p);
+
     return false;
 }
 
@@ -400,15 +407,14 @@ void http_header(struct request *request, char* hname, char* val)
 {
     enum http_hdr_id id;
     struct http_hdr *hdr;
+    char *tmp;
 
-    hdr = mem_zalloc(sizeof(struct http_hdr), hdr_destruct);
-    hdr->name.l = strlen(hname);
-    hdr->name.p = mem_zalloc(hdr->name.l, NULL);
-    strncpy((char*)hdr->name.p, hname, hdr->name.l);
+    hdr = mem_zalloc(sizeof(struct http_hdr), hdr_destruct2);
+    re_sdprintf(&tmp, "%s", hname);
+    pl_set_str(&hdr->name, tmp);
 
-    hdr->val.l = strlen(val);
-    hdr->val.p = mem_zalloc(hdr->val.l, NULL);
-    strncpy((char*)hdr->val.p, val, hdr->val.l);
+    re_sdprintf(&tmp, "%s", val);
+    pl_set_str(&hdr->val, tmp);
 
     id = (enum http_hdr_id)hash_joaat_ci(hdr->name.p, hdr->name.l);
     id &= 0xFFF;
