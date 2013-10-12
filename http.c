@@ -386,18 +386,45 @@ void http_send(struct request *request)
 void http_post(struct request *request, char* key, char* val)
 {
     struct mbuf* mb;
+    char *cur;
+    int sz;
+
     memcpy(&request->meth, "POST", 5);
     if(request->post) {
         mb = request->post;
         mbuf_printf(mb, "&");
     } else {
-	mb = mbuf_alloc(1024);
+	    mb = mbuf_alloc(1024);
     }
+
     if(key) {
-        mbuf_printf(mb, "%s=%s", key, val);
-	request->form = 1;
+        mbuf_printf(mb, "%s=", key);
+
+        sz = 0;
+        cur = val;
+        while(*val) {
+            switch(*val) {
+            case '+':
+            case '&':
+                mbuf_write_mem(mb, cur, sz);
+                sz = 0;
+                mbuf_printf(mb, "%%%02X", *val);
+                val ++;
+                cur = val;
+                break;
+            default:
+                sz++;
+                val++;
+            }
+        }
+        if(cur != val) {
+            mbuf_write_mem(mb, cur, sz);
+        }
+
+	    request->form = 1;
+
     } else {
-	mbuf_printf(mb, "%s", val);
+	    mbuf_printf(mb, "%s", val);
     }
 
     request->post = mb;
