@@ -359,7 +359,13 @@ int addr_lookup(struct request *request, char *name)
 
 void http_resolve(struct request *request)
 {
-    addr_lookup(request, request->host);
+    int ret;
+    ret = addr_lookup(request, request->host);
+    if(ret == 0)
+        return;
+
+    request->err_h(ret, request->arg);
+    mem_deref(request);
 }
 
 
