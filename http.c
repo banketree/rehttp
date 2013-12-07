@@ -412,7 +412,7 @@ void http_post(struct request *request, char* key, char* val)
             switch(*val) {
             case '+':
             case '&':
-                mbuf_write_mem(mb, cur, sz);
+                mbuf_write_mem(mb, (const uint8_t *)cur, sz);
                 sz = 0;
                 mbuf_printf(mb, "%%%02X", *val);
                 val ++;
@@ -424,7 +424,7 @@ void http_post(struct request *request, char* key, char* val)
             }
         }
         if(cur != val) {
-            mbuf_write_mem(mb, cur, sz);
+            mbuf_write_mem(mb, (const uint8_t *)cur, sz);
         }
 
 	    request->form = 1;
