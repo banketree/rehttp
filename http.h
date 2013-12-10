@@ -34,6 +34,7 @@ void http_init(struct httpc *app, struct request **rpp, char *str_uri);
 void http_send(struct request *request);
 void http_post(struct request *request, char* key, char* val);
 void http_header(struct request *request, char* hname, char* val);
+int http_response_header(struct request *req, char *name, char **rp);
 int http_auth(struct request *old, struct request **new, char* user, char*password);
 void http_cb(struct request* request, void *arg, done_h *dh, err_h *eh);
 void http_stream(struct request* request, void *arg, stream_h *srh);

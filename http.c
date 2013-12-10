@@ -482,6 +482,39 @@ void http_header(struct request *request, char* hname, char* val)
     hash_append(request->hdrht, id, &hdr->he, hdr);
 }
 
+struct hdr_fetch {
+    char *name;
+    char **val;
+};
+
+bool hdr_fetch(struct le *le, void *arg)
+{
+    int err = 0;
+    struct http_hdr *hdr = le->data;
+    struct hdr_fetch *op = arg;
+
+    if(pl_strcasecmp(&hdr->name, op->name) == 0) {
+        err = pl_strdup(op->val, &hdr->val);
+        return true;
+    }
+
+    return false;
+}
+
+int http_response_header(struct request *req, char *name, char **rp)
+{
+    int err = 0;
+
+    *rp = NULL;
+    struct hdr_fetch op;
+    op.name = name;
+    op.val = rp;
+
+    hash_apply(req->hdrht, hdr_fetch, &op);
+
+    return err;
+}
+
 int http_clone(struct request **rp, struct request *req)
 {
     struct request *request;
