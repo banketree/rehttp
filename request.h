@@ -13,6 +13,7 @@ typedef enum {
     RESOLVED,
     ESTAB,
     SENT,
+    STREAM,
     END
 } req_state;
 
@@ -46,6 +47,7 @@ struct request {
     struct list cachel;
     err_h *err_h;
     done_h *done_h;
+    stream_h *stream_h;
     void *arg;
 };
 

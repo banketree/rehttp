@@ -193,6 +193,11 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
 
     DEBUG_INFO("recv data[%d]\n", mbuf_get_left(mb));
 
+    if(request->state == STREAM) {
+        request->stream_h(request, HTTP_STREAM_DATA, mb, request->arg);
+        return;
+    }
+
     if(request->body) {
         ok = mbuf_write_mem(request->body, mbuf_buf(mb), mbuf_get_left(mb));
 
@@ -221,22 +226,36 @@ clen:
     if(request->body && request->clen > request->body->end)
 	    return;
 
-    request->done_h(request, request->status, request->arg);
-    request->state = END;
-    mem_deref(request);
+    if(request->status >= 200 || request->stream_h == NULL) {
+        request->done_h(request, request->status, request->arg);
+        request->state = END;
+        mem_deref(request);
+        return;
+    }
+
+    request->state = STREAM;
+    request->stream_h(request, HTTP_STREAM_EST, mb, request->arg);
 }
 
 static void tcp_close_handler(int err, void *arg)
 {
     struct request *request = arg;
-    if(err==0) {
-	if(request->state != END) {
+    if(err!=0) {
+        request->err_h(err, request->arg);
+        goto out;
+    }
+    switch(request->state) {
+    case END:
+        break;
+    case STREAM:
+        request->stream_h(request, HTTP_STREAM_CLOSE, NULL, request->arg);
+        break;
+    default:
 	    err = (request->status == 200) ? -ECONNRESET : request->status;
             request->err_h(err, request->arg);
-	}
-    } else {
-        request->err_h(err, request->arg);
     }
+
+out:
     mem_deref(request);
 }
 
@@ -588,6 +607,13 @@ void http_cb(struct request* request, void *arg, done_h *dh, err_h *eh)
 
     if(eh)
         request->err_h = eh;
+}
+
+void http_stream(struct request* request, void *arg, stream_h *srh)
+{
+    request->arg = arg;
+    if(srh)
+        request->stream_h = srh;
 }
 
 struct mbuf * http_data(struct request *req)
