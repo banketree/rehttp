@@ -208,15 +208,18 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
 
     request->status = pl_u32(&code);
     headers.l = mbuf_get_left(mb) - (headers.p - (const char*)mbuf_buf(mb));
+    body.l = 0;
     parse_headers(request, (char*)headers.p, headers.l, &body);
-    request->body = mbuf_alloc(body.l);
-    mbuf_write_mem(request->body, (const unsigned char*)body.p, body.l);
+    if(body.l) {
+        request->body = mbuf_alloc(body.l);
+        mbuf_write_mem(request->body, (const unsigned char*)body.p, body.l);
+    }
 
     request->response = mem_ref(mb);
 
 clen:
-    if(request->clen > request->body->end)
-	return;
+    if(request->body && request->clen > request->body->end)
+	    return;
 
     request->done_h(request, request->status, request->arg);
     request->state = END;
@@ -374,8 +377,13 @@ void http_send(struct request *request)
     int ok;
 
     if(request->state == START) {
-        http_resolve(request);
-        return;
+        ok = sa_decode(&request->dest, request->host, strlen(request->host));
+        if(ok == 0) {
+            request->state = RESOLVED;
+        } else {
+            http_resolve(request);
+            return;
+        }
     }
     tcp_connect(&request->tcp, &request->dest, 
 		    tcp_estab_handler,
