@@ -38,6 +38,7 @@ int http_response_header(struct request *req, char *name, char **rp);
 int http_auth(struct request *old, struct request **new, char* user, char*password);
 void http_cb(struct request* request, void *arg, done_h *dh, err_h *eh);
 void http_stream(struct request* request, void *arg, stream_h *srh);
+int http_stream_send(struct request* request, struct mbuf*mb);
 
 int http_clone(struct request **rp, struct request *req);
 

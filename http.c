@@ -649,6 +649,14 @@ void http_stream(struct request* request, void *arg, stream_h *srh)
         request->stream_h = srh;
 }
 
+int http_stream_send(struct request* request, struct mbuf*mb)
+{
+    if(request->state == STREAM)
+        return tcp_send(request->tcp, mb);
+
+    return -EINVAL;
+}
+
 struct mbuf * http_data(struct request *req)
 {
     req->body->pos = 0;
