@@ -166,7 +166,7 @@ static void tcp_estab_handler(void *arg)
         mbuf_write_mem(mb, mbuf_buf(request->post),
 			   mbuf_get_left(request->post));
     } else {
-        mbuf_write_str(mb, "\r\n\r\n");
+        mbuf_write_str(mb, "\r\n");
     }
 
     mb->pos = 0;
